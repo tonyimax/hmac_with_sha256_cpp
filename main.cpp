@@ -199,11 +199,13 @@ void sm3_final(SM3_CTX* ctx, uint8_t digest[SM3_DIGEST_SIZE]) {
     }
 }
 
-void SM3_HASH(const char* to_sm3_hash_string,uint8_t* sm3_hash_result)
+void SM3_HASH(const char* to_sm3_hash_string, const int sm3_str_len, uint8_t* sm3_hash_result)
 {
     SM3_CTX ctx;
     sm3_init(&ctx);
-    sm3_update(&ctx,reinterpret_cast<const uint8_t*>(to_sm3_hash_string),strlen(to_sm3_hash_string));
+    //sm3_update(&ctx,reinterpret_cast<const uint8_t*>(to_sm3_hash_string),strlen(to_sm3_hash_string));
+    //std::cout<<"===>SM3_HASH len:"<<sm3_str_len<<std::endl;
+    sm3_update(&ctx,reinterpret_cast<const uint8_t*>(to_sm3_hash_string),sm3_str_len);
     sm3_final(&ctx, sm3_hash_result);
 }
 
@@ -302,13 +304,10 @@ std::vector<unsigned char> hmac_sm3(
     if (adjusted_key.size() > block_size) {
         std::cout << "===>SM3密钥长度大于64字节，需要使用HASH算法取一个32字节新密钥"<<std::endl;
         unsigned char hash[SHA256_DIGEST_LENGTH];//创建一个32字节长度的哈希
-        //replace to SM3
-        SM3_HASH(reinterpret_cast<const char *>(adjusted_key.data()),hash);
-        //SHA256(adjusted_key.data(), adjusted_key.size(), hash);//使用SHA256哈希算法将传入密钥生成哈希值
+        SM3_HASH(reinterpret_cast<const char *>(adjusted_key.data()),adjusted_key.size(),hash);
         adjusted_key = std::vector<unsigned char>(hash, hash + SHA256_DIGEST_LENGTH);//复制32字节哈希值到新密钥变量
         std::cout<<"===>SM3哈希算法计算生成的密钥:";
         print_hex(hash, SHA256_DIGEST_LENGTH);
-        std::cout<<"\n";
     }
 
     // 2. 如果密钥长度小于块大小(密钥长度小于64字节)，用0填充到块大小
@@ -340,52 +339,64 @@ std::vector<unsigned char> hmac_sm3(
     std::cout<<"===>SM3计算内部哈希(公式：内部填充XOR字节＋原始消息字节)  内填充＋消息拼接-->:"<<bytes_to_hex(inner_message)<<std::endl;
 
     unsigned char inner_hash[SHA256_DIGEST_LENGTH];
-    //replace to SM3
-    SM3_HASH(reinterpret_cast<const char *>(inner_message.data()),inner_hash);
-    //SHA256(inner_message.data(), inner_message.size(), inner_hash);
-
+    auto  to_sm3_str = bytes_to_hex(inner_message);
+    SM3_HASH(to_sm3_str.data(),to_sm3_str.size(),inner_hash);
     std::cout<<"===>SM3计算内部哈希(公式：内部填充XOR字节＋原始消息字节):  （内填充＋消息拼接）32字节HASH--->";
     print_hex(inner_hash, SHA256_DIGEST_LENGTH);
-    std::cout<<std::endl;
+
+
+    //86a54d4176c4d1a255d810264fd9752b7d53ab47111e71204e14e4eaaa0c5150   --SM3
+    //86a54d4176c4d1a255d810264fd9752b7d53ab47111e71204e14e4eaaa0c5150   --online
 
     // 5. 计算外部哈希
     std::vector<unsigned char> outer_message = o_key_pad;
     outer_message.insert(outer_message.end(), inner_hash, inner_hash + SHA256_DIGEST_LENGTH);
-
     std::cout<<"===>SM3计算外部哈希(公式：外部填充XOR字节＋内部HASH值)  外填充＋内部HASH值拼接-->:"<<bytes_to_hex(outer_message)<<std::endl;
 
     unsigned char hmac_result[SHA256_DIGEST_LENGTH];
-    //replace to SM3
-    SM3_HASH(reinterpret_cast<const char *>(outer_message.data()),hmac_result);
-    //SHA256(outer_message.data(), outer_message.size(), hmac_result);
+    auto to_hmac_str = bytes_to_hex(outer_message);
+    SM3_HASH(to_hmac_str.data(),to_hmac_str.size(),hmac_result);
 
     std::cout<<"===>SM3计算外部哈希(公式：外部填充XOR字节＋内部HASH值)  (外填充＋内部HASH值拼接) 32字节HASH--->最终的HMAC_SM3 HASH:";
     print_hex(hmac_result, SHA256_DIGEST_LENGTH);
-    std::cout<<std::endl;
+
+    //0f6770b68f4486ff7648d0ffb7424376e7afe7d29042b50e996034cddc603e77    --sm3
+    //0f6770b68f4486ff7648d0ffb7424376e7afe7d29042b50e996034cddc603e77    --online
 
     return std::vector<unsigned char>(hmac_result, hmac_result + SHA256_DIGEST_LENGTH);
 }
 
 int main() {
-    // 示例使用
-    std::string key = "secretKey_secretKey_secretKey_secretKey_secretKey_secretKey_secretKey";
-    std::string message = "Hello, HMAC-SHA256!";
+    //std::string key = "secretKey_secretKey_secretKey_secretKey_secretKey_secretKey_secretKey";
+    std::string key="secretKey";
+    //6d9995ebdf18aab369eab60e0cc259a5922d29645738da737f9077ac41fd1e0c     --SM3运算结果
+    //b23813da7f066be253e3bdfa41f87e010b585ff970ff54e428fdcc34b0ad1e50     --SHA256运算结果
+
+    std::string message = "Hello, HMAC-SM3!";
+    //2c2d7be4307a1a030c018f9ff34be0180369d209ca2965293150588c9669b7df     --HMAC_SM3     key=secretKey
+    //ba993015a6e3cee9d632f52144c69db853f7a04ca6335139d2d538d0e49ab30a     --HMAC_SHA256  key=secretKey
+
     std::cout <<"===>原始密钥字符串:"<<key<<std::endl;
     std::cout <<"===>原始消息字符串:"<<message<<std::endl;
 
-    auto hmac_result = hmac_sha256(string_to_bytes(key), string_to_bytes(message));
+    std::cout << "密钥:"<<key<<"进行SHA256哈希运算后--> ";
+    uint8_t hash1_result[32]{0};
+    SHA256((unsigned char*)key.data(),key.size(),hash1_result);
+    print_hex(hash1_result, 32);
 
+    auto hmac_result = hmac_sha256(string_to_bytes(key), string_to_bytes(message));
     std::cout << "HMAC-SHA256 of \"" << message << "\" with key \"" << key << "\":\n";
     std::cout << bytes_to_hex(hmac_result) << std::endl;
 
-    std::cout << "HMAC-SM3 TEST:\n";
+    std::cout << "\nHMAC-SM3 TEST:\n";
+    std::cout << "原始密钥:"<<key<<std::endl;
+    std::cout << "原始消息:"<<message<<std::endl;
+    std::cout << "原始密钥:"<<key<<"进行SM3哈希运算后--> ";
     uint8_t hash_result[32]{0};
-    SM3_HASH(key.c_str(),hash_result);
+    SM3_HASH(key.c_str(),key.size(),hash_result);
     print_hex(hash_result, 32);
-    //a1bd67ceb9c76d9b1f3a8b161a0ef48478b851709403d5faa0189cb76ce9fd0d   --sm3
-    //a1bd67ceb9c76d9b1f3a8b161a0ef48478b851709403d5faa0189cb76ce9fd0d   --online
-    auto hmac_sm3_result = hmac_sm3(string_to_bytes(key), string_to_bytes("Hello, HMAC-SM3!"));
 
+    auto hmac_sm3_result = hmac_sm3(string_to_bytes(key), string_to_bytes(message));
 
     return 0;
 }
